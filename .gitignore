@@ -1,4 +1,6 @@
 .env
 .token
 .pyc
-.db
+*.db
+__pycache__
+venv
