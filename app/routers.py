@@ -104,10 +104,9 @@ def posts_create(
     nickname: str = Form(...),
     password: str = Form(...),
     tags: str = Form(""),
-    images: list[UploadFile] | None = File(default=None),
+    images: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
-    images = images or []
     if len(images) > 10:
         raise HTTPException(status_code=400, detail="image limit is 10")
     image_paths = []
