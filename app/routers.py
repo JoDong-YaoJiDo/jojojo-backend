@@ -107,10 +107,21 @@ def posts_create(
     images: list[UploadFile] = File(default=[]),
     db: Session = Depends(get_db),
 ):
-    if len(images) > 10:
+    normalized_images: list[UploadFile] = []
+    if images:
+        for img in images:
+            if img is None:
+                continue
+            if not getattr(img, "filename", None):
+                continue
+            if getattr(img, "size", None) == 0:
+                continue
+            normalized_images.append(img)
+
+    if len(normalized_images) > 10:
         raise HTTPException(status_code=400, detail="image limit is 10")
     image_paths = []
-    for img in images:
+    for img in normalized_images:
         original_name = img.filename or "image"
         filename = f"{os.urandom(8).hex()}_{original_name}"
         target = Path(settings.upload_dir) / filename
