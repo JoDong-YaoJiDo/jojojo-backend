@@ -104,26 +104,34 @@ def posts_create(
     nickname: str = Form(...),
     password: str = Form(...),
     tags: str = Form(""),
-    images: list[UploadFile] = File(default_factory=list),
+    images: list[UploadFile] | None = File(default=None),
     db: Session = Depends(get_db),
 ):
+    images = images or []
     if len(images) > 10:
         raise HTTPException(status_code=400, detail="image limit is 10")
     image_paths = []
     for img in images:
-        filename = f"{os.urandom(8).hex()}_{img.filename}"
+        original_name = img.filename or "image"
+        filename = f"{os.urandom(8).hex()}_{original_name}"
         target = Path(settings.upload_dir) / filename
-        target.write_bytes(img.file.read())
+        file_bytes = img.file.read()
+        if file_bytes:
+            target.write_bytes(file_bytes)
         image_paths.append(str(target))
-    payload = PostCreate(
-        title=title,
-        content=content,
-        nickname=nickname,
-        password=password,
-        tags=[t.strip() for t in tags.split(",") if t.strip()],
-    )
-    post = create_post(db, payload, image_paths)
-    return {"id": post.id}
+    try:
+        payload = PostCreate(
+            title=title,
+            content=content,
+            nickname=nickname,
+            password=password,
+            tags=[t.strip() for t in tags.split(",") if t.strip()],
+        )
+        post = create_post(db, payload, image_paths)
+        return {"id": post.id}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"failed to create post: {exc}")
 
 
 @api.get("/posts/{post_id}", summary="게시글 상세 조회")
