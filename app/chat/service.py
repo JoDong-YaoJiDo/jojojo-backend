@@ -1,8 +1,31 @@
 from openai import OpenAI
+import json
 
 from app.core.config import settings
+from .tools import build_context
 
-from .retriever import get_context
+
+def extract_keyword(client, message):
+
+    response = client.responses.create(
+        model=settings.openai_model,
+        input=f"""
+사용자의 관광 관련 질문에서 검색에 사용할 핵심 장소명 또는 키워드만 추출해라.
+
+규칙
+- 반드시 JSON만 출력
+- 형식은 {{"keyword":"..."}}
+
+질문:
+{message}
+"""
+    )
+
+    try:
+        result = json.loads(response.output_text)
+        return result["keyword"]
+    except Exception:
+        return message
 
 
 def chat(message, db):
@@ -11,14 +34,28 @@ def chat(message, db):
         api_key=settings.openai_api_key
     )
 
-    context = get_context(db)
-
-    prompt = (
-        "지역 관광 정보와 커뮤니티 게시글을 "
-        "바탕으로 질문에 답하세요.\n"
-        f"context={context}\n"
-        f"user={message}"
+    # 검색 키워드 추출
+    keyword = extract_keyword(
+        client,
+        message,
     )
+
+    # DB 검색
+    context = build_context(
+        keyword,
+        db,
+    )
+
+    prompt = f"""
+너는 부산 여행 전문 챗봇이다.
+
+다음 Context를 참고하여 답변해라.
+
+{context}
+
+사용자 질문
+{message}
+"""
 
     response = client.responses.create(
         model=settings.openai_model,
@@ -31,5 +68,5 @@ def chat(message, db):
             "output_text",
             None,
         )
-        or "오류가 발생했습니다"
+        or "오류가 발생했습니다."
     )
