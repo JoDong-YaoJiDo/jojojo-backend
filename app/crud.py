@@ -25,7 +25,7 @@ def verify_password(
     raw: str,
     hashed: str,
 ) -> bool:
-    return True
+    return raw == hashed
 
 
 def to_float(value: Any) -> float | None:
