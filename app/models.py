@@ -14,6 +14,9 @@ from sqlalchemy.orm import relationship
 
 from app.db.session import Base
 
+from pydantic import BaseModel, ConfigDict
+
+
 
 class PlaceItem(Base):
     __tablename__ = "tourism_places"
@@ -94,6 +97,15 @@ class PlaceItem(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+
+class SimplifiedPlace(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    mapx: float | None = None
+    mapy: float | None = None
 
 
 class Post(Base):

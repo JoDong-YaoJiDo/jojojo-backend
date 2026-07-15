@@ -36,7 +36,7 @@ from app.crud import (
 )
 from app.db.init_db import init_db
 from app.db.session import SessionLocal
-from app.models import Comment, PlaceItem, Post
+from app.models import Comment, PlaceItem, Post, SimplifiedPlace
 from app.schemas import (
     ChatRequest,
     ChatResponse,
@@ -110,6 +110,57 @@ def places(
         )
         .all()
     )
+
+
+
+@api.get(
+    "/all-places",
+    response_model=list[SimplifiedPlace],
+    summary="전체 장소 목록 조회",
+)
+def places(
+    content_type_id: Optional[int] = None,
+    region: Optional[str] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(
+        PlaceItem.id,
+        PlaceItem.title,
+        PlaceItem.mapx,
+        PlaceItem.mapy,
+    )
+
+    if content_type_id is not None:
+        query = query.filter(
+            PlaceItem.content_type_id
+            == content_type_id
+        )
+
+    if region:
+        query = query.filter(
+            PlaceItem.region == region
+        )
+
+    if q:
+        query = query.filter(
+            PlaceItem.title.ilike(
+                f"%{q}%"
+            )
+        )
+
+    return (
+        query.order_by(
+            PlaceItem.title.asc(),
+            PlaceItem.id.asc(),
+        )
+        .all()
+    )
+
+
+
+
+
 
 
 @api.get(
