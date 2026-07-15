@@ -4,6 +4,6 @@ sqlalchemy
 pydantic
 pydantic-settings
 python-multipart
-passlib[bcrypt]
+# passlib[bcrypt]
 openai
 
