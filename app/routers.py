@@ -36,6 +36,10 @@ def get_db():
     finally:
         db.close()
 
+@api.get("/health")
+def health():
+    return {"status": "ok"}
+
 
 @api.on_event("startup")
 def on_startup():
