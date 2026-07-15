@@ -2,7 +2,15 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -14,16 +22,26 @@ from app.crud import (
     get_post_or_404,
     like_post,
     list_comments,
+    list_place_content_types,
     list_posts,
-    load_tourism_json,
+    list_posts_by_place,
+    load_jsons,
     search_posts,
+    serialize_place_summary,
     serialize_post,
     update_post,
 )
 from app.db.init_db import init_db
 from app.db.session import SessionLocal
-from app.models import Comment, Post, TourismPlace
-from app.schemas import ChatRequest, ChatResponse, CommentCreate, PostCreate, PostUpdate, TourismPlaceOut
+from app.models import Comment, PlaceItem, Post
+from app.schemas import (
+    ChatRequest,
+    ChatResponse,
+    CommentCreate,
+    Place,
+    PostCreate,
+    PostUpdate,
+)
 
 
 api = APIRouter(prefix="/api", tags=["api"])
@@ -31,186 +49,635 @@ api = APIRouter(prefix="/api", tags=["api"])
 
 def get_db():
     db = SessionLocal()
+
     try:
         yield db
     finally:
         db.close()
+
 
 @api.get("/health")
 def health():
     return {"status": "ok"}
 
 
-@api.on_event("startup")
-def on_startup():
-    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
-    init_db()
-    db = SessionLocal()
-    try:
-        load_tourism_json(db)
-    finally:
-        db.close()
+@api.get(
+    "/tourism",
+    response_model=list[Place],
+    summary="관광지 목록 조회",
+)
+def tourism_list(
+    region: Optional[str] = None,
+    content_type: Optional[str] = None,
+    q: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(PlaceItem)
 
-
-@api.get("/tourism", response_model=list[TourismPlaceOut], summary="관광지 목록 조회")
-def tourism_list(region: Optional[str] = None, q: Optional[str] = None, db: Session = Depends(get_db)):
-    query = db.query(TourismPlace)
     if region:
-        query = query.filter(TourismPlace.region == region)
+        query = query.filter(
+            PlaceItem.region == region
+        )
+
+    if content_type:
+        query = query.filter(
+            PlaceItem.content_type == content_type
+        )
+
     if q:
-        query = query.filter(TourismPlace.title.ilike(f"%{q}%"))
-    return query.order_by(TourismPlace.id.desc()).all()
+        query = query.filter(
+            PlaceItem.title.ilike(f"%{q}%")
+        )
+
+    return (
+        query.order_by(PlaceItem.id.desc())
+        .all()
+    )
 
 
-@api.get("/tourism/{place_id}/location", summary="관광지 좌표 조회")
-def tourism_location(place_id: int, db: Session = Depends(get_db)):
-    place = db.query(TourismPlace).filter(TourismPlace.id == place_id).first()
-    if not place:
-        raise HTTPException(status_code=404, detail="tourism place not found")
-    return {"id": place.id, "title": place.title, "mapx": place.mapx, "mapy": place.mapy}
+@api.get(
+    "/tourism/categories",
+    summary="관광지 카테고리 목록 조회",
+)
+def tourism_categories(
+    region: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    items = list_place_content_types(
+        db=db,
+        region=region,
+    )
 
-
-@api.get("/posts", summary="게시글 목록 조회")
-def posts(sort: str = "latest", page: int = 1, size: int = 20, db: Session = Depends(get_db)):
-    items, total = list_posts(db, sort, page, size)
     return {
-        "page": page,
-        "size": size,
+        "items": items,
+    }
+
+
+@api.get(
+    "/tourism/{place_id}",
+    response_model=Place,
+    summary="관광지 상세 조회",
+)
+def tourism_detail(
+    place_id: int,
+    db: Session = Depends(get_db),
+):
+    place = (
+        db.query(PlaceItem)
+        .filter(PlaceItem.id == place_id)
+        .first()
+    )
+
+    if not place:
+        raise HTTPException(
+            status_code=404,
+            detail="tourism place not found",
+        )
+
+    return place
+
+
+@api.get(
+    "/tourism/{place_id}/location",
+    summary="관광지 좌표 조회",
+)
+def tourism_location(
+    place_id: int,
+    db: Session = Depends(get_db),
+):
+    place = (
+        db.query(PlaceItem)
+        .filter(PlaceItem.id == place_id)
+        .first()
+    )
+
+    if not place:
+        raise HTTPException(
+            status_code=404,
+            detail="tourism place not found",
+        )
+
+    return {
+        "id": place.id,
+        "title": place.title,
+        "mapx": place.mapx,
+        "mapy": place.mapy,
+    }
+
+
+@api.get(
+    "/tourism/{place_id}/posts",
+    summary="장소별 게시글 목록 조회",
+)
+def tourism_posts(
+    place_id: int,
+    sort: str = "latest",
+    page: int = 1,
+    size: int = 20,
+    db: Session = Depends(get_db),
+):
+    place, items, total = list_posts_by_place(
+        db=db,
+        place_id=place_id,
+        sort=sort,
+        page=page,
+        size=size,
+    )
+
+    normalized_page = max(page, 1)
+    normalized_size = min(
+        max(size, 1),
+        100,
+    )
+
+    return {
+        "place": serialize_place_summary(place),
+        "page": normalized_page,
+        "size": normalized_size,
         "total": total,
         "items": [
-            {
-                "id": p.id,
-                "title": p.title,
-                "nickname": p.nickname,
-                "view_count": p.view_count,
-                "like_count": p.like_count,
-                "bookmark_count": p.bookmark_count,
-                "created_at": p.created_at,
-                "updated_at": p.updated_at,
-                "tags": [t.tag for t in p.tags],
-                "image_count": len(p.images),
-            }
-            for p in items
+            serialize_post(post)
+            for post in items
         ],
     }
 
 
-@api.get("/posts/search", summary="게시글 검색")
-def posts_search(q: str, db: Session = Depends(get_db)):
-    items = search_posts(db, q)
-    return {"items": [serialize_post(p) for p in items]}
+@api.get(
+    "/posts",
+    summary="게시글 목록 조회",
+)
+def posts(
+    sort: str = "latest",
+    page: int = 1,
+    size: int = 20,
+    place_id: Optional[int] = None,
+    region: Optional[str] = None,
+    content_type: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    items, total = list_posts(
+        db=db,
+        sort=sort,
+        page=page,
+        size=size,
+        place_id=place_id,
+        region=region,
+        content_type=content_type,
+    )
+
+    normalized_page = max(page, 1)
+    normalized_size = min(
+        max(size, 1),
+        100,
+    )
+
+    return {
+        "page": normalized_page,
+        "size": normalized_size,
+        "total": total,
+        "items": [
+            {
+                "id": post.id,
+                "place_id": post.place_id,
+                "place": serialize_place_summary(
+                    post.place
+                ),
+                "title": post.title,
+                "nickname": post.nickname,
+                "view_count": post.view_count,
+                "like_count": post.like_count,
+                "bookmark_count": (
+                    post.bookmark_count
+                ),
+                "created_at": post.created_at,
+                "updated_at": post.updated_at,
+                "tags": [
+                    tag.tag
+                    for tag in post.tags
+                ],
+                "image_count": len(
+                    post.images
+                ),
+            }
+            for post in items
+        ],
+    }
 
 
-@api.post("/posts", summary="게시글 생성")
+@api.get(
+    "/posts/search",
+    summary="게시글 검색",
+)
+def posts_search(
+    q: str,
+    place_id: Optional[int] = None,
+    region: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    items = search_posts(
+        db=db,
+        q=q,
+        place_id=place_id,
+        region=region,
+    )
+
+    return {
+        "items": [
+            serialize_post(post)
+            for post in items
+        ],
+    }
+
+
+@api.post(
+    "/posts",
+    summary="게시글 생성",
+)
 def posts_create(
+    place_id: int = Form(...),
     title: str = Form(...),
     content: str = Form(...),
     nickname: str = Form(...),
     password: str = Form(...),
     tags: str = Form(""),
-    images: list[UploadFile] = File(default=[]),
+    images: list[UploadFile] = File(
+        default=[]
+    ),
     db: Session = Depends(get_db),
 ):
     normalized_images: list[UploadFile] = []
-    if images:
-        for img in images:
-            if img is None:
-                continue
-            if not getattr(img, "filename", None):
-                continue
-            if getattr(img, "size", None) == 0:
-                continue
-            normalized_images.append(img)
+
+    for image in images or []:
+        if image is None:
+            continue
+
+        if not image.filename:
+            continue
+
+        if getattr(
+            image,
+            "size",
+            None,
+        ) == 0:
+            continue
+
+        normalized_images.append(image)
 
     if len(normalized_images) > 10:
-        raise HTTPException(status_code=400, detail="image limit is 10")
-    image_paths = []
-    for img in normalized_images:
-        original_name = img.filename or "image"
-        filename = f"{os.urandom(8).hex()}_{original_name}"
-        target = Path(settings.upload_dir) / filename
-        file_bytes = img.file.read()
-        if file_bytes:
-            target.write_bytes(file_bytes)
-        image_paths.append(str(target))
+        raise HTTPException(
+            status_code=400,
+            detail="image limit is 10",
+        )
+
+    image_paths: list[str] = []
+
     try:
+        for image in normalized_images:
+            original_name = (
+                Path(image.filename).name
+                if image.filename
+                else "image"
+            )
+
+            filename = (
+                f"{os.urandom(8).hex()}_"
+                f"{original_name}"
+            )
+
+            target = (
+                Path(settings.upload_dir)
+                / filename
+            )
+
+            file_bytes = image.file.read()
+
+            if not file_bytes:
+                continue
+
+            target.write_bytes(file_bytes)
+            image_paths.append(
+                str(target)
+            )
+
         payload = PostCreate(
+            place_id=place_id,
             title=title,
             content=content,
             nickname=nickname,
             password=password,
-            tags=[t.strip() for t in tags.split(",") if t.strip()],
+            tags=[
+                tag.strip()
+                for tag in tags.split(",")
+                if tag.strip()
+            ],
         )
-        post = create_post(db, payload, image_paths)
-        return {"id": post.id}
+
+        post = create_post(
+            db=db,
+            payload=payload,
+            image_paths=image_paths,
+        )
+
+        return {
+            "id": post.id,
+            "place_id": post.place_id,
+        }
+
+    except HTTPException:
+        db.rollback()
+
+        for image_path in image_paths:
+            path = Path(image_path)
+
+            if path.exists():
+                path.unlink()
+
+        raise
+
     except Exception as exc:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"failed to create post: {exc}")
+
+        for image_path in image_paths:
+            path = Path(image_path)
+
+            if path.exists():
+                path.unlink()
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "failed to create post: "
+                f"{exc}"
+            ),
+        ) from exc
 
 
-@api.get("/posts/{post_id}", summary="게시글 상세 조회")
-def posts_detail(post_id: int, db: Session = Depends(get_db)):
-    post = get_post_or_404(db, post_id)
-    add_view_count(db, post)
-    return serialize_post(post) | {"comments": [comment_to_tree(c) for c in list_comments(db, post_id)]}
+@api.get(
+    "/posts/{post_id}",
+    summary="게시글 상세 조회",
+)
+def posts_detail(
+    post_id: int,
+    db: Session = Depends(get_db),
+):
+    post = get_post_or_404(
+        db=db,
+        post_id=post_id,
+    )
+
+    add_view_count(
+        db=db,
+        post=post,
+    )
+
+    return serialize_post(post) | {
+        "comments": [
+            comment_to_tree(comment)
+            for comment in list_comments(
+                db=db,
+                post_id=post_id,
+            )
+        ],
+    }
 
 
-@api.put("/posts/{post_id}", summary="게시글 수정")
-def posts_update(post_id: int, payload: PostUpdate, db: Session = Depends(get_db)):
-    post = get_post_or_404(db, post_id)
-    return serialize_post(update_post(db, post, payload))
+@api.put(
+    "/posts/{post_id}",
+    summary="게시글 수정",
+)
+def posts_update(
+    post_id: int,
+    payload: PostUpdate,
+    db: Session = Depends(get_db),
+):
+    post = get_post_or_404(
+        db=db,
+        post_id=post_id,
+    )
+
+    updated_post = update_post(
+        db=db,
+        post=post,
+        payload=payload,
+    )
+
+    return serialize_post(
+        updated_post
+    )
 
 
-@api.delete("/posts/{post_id}", summary="게시글 삭제")
-def posts_delete(post_id: int, password: str, db: Session = Depends(get_db)):
-    post = get_post_or_404(db, post_id)
-    delete_post(db, post, password)
+@api.delete(
+    "/posts/{post_id}",
+    summary="게시글 삭제",
+)
+def posts_delete(
+    post_id: int,
+    password: str,
+    db: Session = Depends(get_db),
+):
+    post = get_post_or_404(
+        db=db,
+        post_id=post_id,
+    )
+
+    delete_post(
+        db=db,
+        post=post,
+        password=password,
+    )
+
     return {"ok": True}
 
 
-@api.post("/posts/{post_id}/comments", summary="댓글/답글 생성")
-def comments_create(post_id: int, payload: CommentCreate, db: Session = Depends(get_db)):
-    post = get_post_or_404(db, post_id)
-    comment = Comment(post_id=post.id, parent_id=payload.parent_id, nickname=payload.nickname, content=payload.content)
+@api.post(
+    "/posts/{post_id}/comments",
+    summary="댓글/답글 생성",
+)
+def comments_create(
+    post_id: int,
+    payload: CommentCreate,
+    db: Session = Depends(get_db),
+):
+    post = get_post_or_404(
+        db=db,
+        post_id=post_id,
+    )
+
+    if payload.parent_id is not None:
+        parent = (
+            db.query(Comment)
+            .filter(
+                Comment.id
+                == payload.parent_id,
+                Comment.post_id
+                == post_id,
+            )
+            .first()
+        )
+
+        if not parent:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "parent comment "
+                    "not found"
+                ),
+            )
+
+    comment = Comment(
+        post_id=post.id,
+        parent_id=payload.parent_id,
+        nickname=payload.nickname,
+        content=payload.content,
+    )
+
     db.add(comment)
     db.commit()
     db.refresh(comment)
-    return {"id": comment.id}
+
+    return {
+        "id": comment.id,
+    }
 
 
-@api.post("/posts/{post_id}/like", summary="좋아요 등록")
-def posts_like(post_id: int, client_id: str, db: Session = Depends(get_db)):
-    post = get_post_or_404(db, post_id)
-    like_post(db, post, client_id)
+@api.post(
+    "/posts/{post_id}/like",
+    summary="좋아요 등록",
+)
+def posts_like(
+    post_id: int,
+    client_id: str,
+    db: Session = Depends(get_db),
+):
+    post = get_post_or_404(
+        db=db,
+        post_id=post_id,
+    )
+
+    like_post(
+        db=db,
+        post=post,
+        client_id=client_id,
+    )
+
     return {"ok": True}
 
 
-@api.post("/posts/{post_id}/bookmark", summary="북마크 등록")
-def posts_bookmark(post_id: int, client_id: str, db: Session = Depends(get_db)):
-    post = get_post_or_404(db, post_id)
-    bookmark_post(db, post, client_id)
+@api.post(
+    "/posts/{post_id}/bookmark",
+    summary="북마크 등록",
+)
+def posts_bookmark(
+    post_id: int,
+    client_id: str,
+    db: Session = Depends(get_db),
+):
+    post = get_post_or_404(
+        db=db,
+        post_id=post_id,
+    )
+
+    bookmark_post(
+        db=db,
+        post=post,
+        client_id=client_id,
+    )
+
     return {"ok": True}
 
 
-@api.post("/chat", response_model=ChatResponse, summary="챗봇 응답 생성")
-def chat(req: ChatRequest, db: Session = Depends(get_db)):
+@api.post(
+    "/chat",
+    response_model=ChatResponse,
+    summary="챗봇 응답 생성",
+)
+def chat(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+):
     try:
         from openai import OpenAI
 
-        client = OpenAI(api_key=settings.openai_api_key)
+        client = OpenAI(
+            api_key=settings.openai_api_key
+        )
+
+        tourism_places = (
+            db.query(PlaceItem)
+            .order_by(
+                PlaceItem.id.desc()
+            )
+            .limit(20)
+            .all()
+        )
+
+        posts = (
+            db.query(Post)
+            .order_by(
+                Post.created_at.desc()
+            )
+            .limit(20)
+            .all()
+        )
+
         context = {
-            "tourism": [p.title for p in db.query(TourismPlace).limit(20).all()],
-            "posts": [p.title for p in db.query(Post).limit(20).all()],
+            "tourism": [
+                {
+                    "id": place.id,
+                    "title": place.title,
+                    "region": place.region,
+                    "content_type": (
+                        place.content_type
+                    ),
+                }
+                for place in tourism_places
+            ],
+            "posts": [
+                {
+                    "id": post.id,
+                    "place_id": (
+                        post.place_id
+                    ),
+                    "title": post.title,
+                }
+                for post in posts
+            ],
         }
-        prompt = f"지역 관광 정보와 커뮤니티를 바탕으로 질문에 답하세요. context={context}\nuser={req.message}"
-        resp = client.responses.create(model=settings.openai_model, input=prompt)
-        text = getattr(resp, "output_text", None) or "오류가 발생했습니다"
-        return ChatResponse(answer=text)
+
+        prompt = (
+            "지역 관광 정보와 커뮤니티 게시글을 "
+            "바탕으로 질문에 답하세요.\n"
+            f"context={context}\n"
+            f"user={req.message}"
+        )
+
+        response = client.responses.create(
+            model=settings.openai_model,
+            input=prompt,
+        )
+
+        text = (
+            getattr(
+                response,
+                "output_text",
+                None,
+            )
+            or "오류가 발생했습니다"
+        )
+
+        return ChatResponse(
+            answer=text
+        )
+
     except Exception:
-        return ChatResponse(answer="오류가 발생했습니다")
+        return ChatResponse(
+            answer="오류가 발생했습니다"
+        )
 
 
-def comment_to_tree(comment: Comment):
+def comment_to_tree(
+    comment: Comment,
+) -> dict:
     return {
         "id": comment.id,
         "post_id": comment.post_id,
@@ -219,13 +686,39 @@ def comment_to_tree(comment: Comment):
         "content": comment.content,
         "created_at": comment.created_at,
         "updated_at": comment.updated_at,
-        "replies": [comment_to_tree(reply) for reply in comment.replies],
+        "replies": [
+            comment_to_tree(reply)
+            for reply in comment.replies
+        ],
     }
 
 
 app = FastAPI(
     title="Local Community Backend",
     version="1.0.0",
-    description="관광지 조회, 익명 커뮤니티, 댓글/좋아요/북마크, 챗봇을 포함한 지역 정보 공유 백엔드",
+    description=(
+        "관광지 조회, 익명 커뮤니티, "
+        "댓글/좋아요/북마크, 챗봇을 포함한 "
+        "지역 정보 공유 백엔드"
+    ),
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    Path(settings.upload_dir).mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    init_db()
+
+    db = SessionLocal()
+
+    try:
+        load_jsons(db)
+    finally:
+        db.close()
+
+
 app.include_router(api)
