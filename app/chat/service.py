@@ -47,7 +47,7 @@ def chat(message, db):
     )
 
     prompt = f"""
-너는 부산 여행 전문 챗봇이다.
+너는 대한민국 여행 전문 챗봇이다.
 
 다음 Context를 참고하여 답변해라.
 
