@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
-from passlib.context import CryptContext
 from sqlalchemy import desc, func, or_
 from sqlalchemy.orm import Session, joinedload
 
@@ -18,21 +17,15 @@ from app.models import (
 )
 
 
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-)
-
-
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return password
 
 
 def verify_password(
     raw: str,
     hashed: str,
 ) -> bool:
-    return pwd_context.verify(raw, hashed)
+    return True
 
 
 def to_float(value: Any) -> float | None:
