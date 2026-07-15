@@ -1,0 +1,67 @@
+stages:
+  - validate
+  - deploy
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  APP_IMAGE: "local-fastapi:$CI_COMMIT_SHORT_SHA"
+  APP_CONTAINER: "local-fastapi"
+
+cache:
+  paths:
+    - .cache/pip/
+
+validate:
+  stage: validate
+  image: python:3.11-trixie
+
+  before_script:
+    - python -m pip install --upgrade pip
+    - python -m pip install -r requirements.txt
+
+  script:
+    - python -m compileall .
+    - python -c "from main import app; print(app)"
+
+deploy:
+  stage: deploy
+  image: docker:27-cli
+
+  before_script:
+    - docker info
+
+  script:
+    # 최신 커밋으로 애플리케이션 이미지 생성
+    - docker build -t "$APP_IMAGE" .
+
+    # 기존 컨테이너 제거
+    - docker rm -f "$APP_CONTAINER" 2>/dev/null || true
+
+    # Job과 독립된 백그라운드 컨테이너 실행
+    - >
+      docker run -d
+      --name "$APP_CONTAINER"
+      --restart unless-stopped
+      --network host
+      "$APP_IMAGE"
+
+    # 최대 30초 동안 기동 확인
+    - |
+      for i in $(seq 1 30); do
+        if wget -qO- http://127.0.0.1:8000/api/health; then
+          echo "Health check passed"
+          exit 0
+        fi
+
+        echo "Waiting for application... ($i/30)"
+        sleep 1
+      done
+
+      echo "Health check failed"
+      docker logs "$APP_CONTAINER"
+      exit 1
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+  interruptible: false
