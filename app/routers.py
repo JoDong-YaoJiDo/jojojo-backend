@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from fastapi.middleware.cors import CORSMiddleware
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -723,6 +725,19 @@ app = FastAPI(
         "댓글, 좋아요, 북마크, 챗봇을 포함한 "
         "지역 정보 공유 백엔드"
     ),
+)
+
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
