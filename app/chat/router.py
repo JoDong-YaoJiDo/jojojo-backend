@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.routers import get_db  # 의존성 문제 추후 db.session으로 get_db 이동하여 개선 필요
 from app.schemas import ChatRequest, ChatResponse
 
 from .service import chat
