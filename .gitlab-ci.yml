@@ -43,6 +43,7 @@ deploy:
       --name "$APP_CONTAINER"
       --restart unless-stopped
       --network host
+      -v /jojojo-data:/app/data
       "$APP_IMAGE"
 
     # 최대 30초 동안 기동 확인
