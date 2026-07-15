@@ -52,7 +52,7 @@ def to_int(
 
 
 def load_jsons(db: Session) -> int:
-    json_dir = Path("./data")
+    json_dir = Path("./")
 
     if not json_dir.exists():
         return 0
