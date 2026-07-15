@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class TourismPlaceOut(BaseModel):
+class Place(BaseModel):
     id: int
     content_id: str
     region: str
@@ -25,7 +25,21 @@ class TourismPlaceOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PlaceSummary(BaseModel):
+    id: int
+    content_id: str
+    region: str
+    content_type: str
+    title: str
+    firstimage: str
+    mapx: Optional[float] = None
+    mapy: Optional[float] = None
+
+    model_config = {"from_attributes": True}
+
+
 class PostCreate(BaseModel):
+    place_id: int
     title: str
     content: str
     nickname: str
@@ -35,6 +49,7 @@ class PostCreate(BaseModel):
 
 class PostUpdate(BaseModel):
     password: str
+    place_id: Optional[int] = None
     title: Optional[str] = None
     content: Optional[str] = None
     nickname: Optional[str] = None
@@ -43,6 +58,8 @@ class PostUpdate(BaseModel):
 
 class PostListItem(BaseModel):
     id: int
+    place_id: int
+    place: PlaceSummary
     title: str
     nickname: str
     view_count: int
@@ -52,6 +69,8 @@ class PostListItem(BaseModel):
     updated_at: datetime
     tags: list[str]
     image_count: int
+
+    model_config = {"from_attributes": True}
 
 
 class CommentCreate(BaseModel):
@@ -83,4 +102,3 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-
