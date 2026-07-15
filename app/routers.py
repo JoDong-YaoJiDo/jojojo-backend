@@ -19,6 +19,7 @@ from app.crud import (
     bookmark_post,
     create_post,
     delete_post,
+    get_place_or_404,
     get_post_or_404,
     like_post,
     list_comments,
@@ -44,7 +45,10 @@ from app.schemas import (
 )
 
 
-api = APIRouter(prefix="/api", tags=["api"])
+api = APIRouter(
+    prefix="/api",
+    tags=["api"],
+)
 
 
 def get_db():
@@ -56,50 +60,61 @@ def get_db():
         db.close()
 
 
-@api.get("/health")
+@api.get(
+    "/health",
+    summary="서버 상태 확인",
+)
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+    }
 
 
 @api.get(
-    "/tourism",
+    "/places",
     response_model=list[Place],
-    summary="관광지 목록 조회",
+    summary="카테고리별 장소 목록 조회",
 )
-def tourism_list(
+def places(
+    content_type_id: Optional[int] = None,
     region: Optional[str] = None,
-    content_type: Optional[str] = None,
     q: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(PlaceItem)
+
+    if content_type_id is not None:
+        query = query.filter(
+            PlaceItem.content_type_id
+            == content_type_id
+        )
 
     if region:
         query = query.filter(
             PlaceItem.region == region
         )
 
-    if content_type:
-        query = query.filter(
-            PlaceItem.content_type == content_type
-        )
-
     if q:
         query = query.filter(
-            PlaceItem.title.ilike(f"%{q}%")
+            PlaceItem.title.ilike(
+                f"%{q}%"
+            )
         )
 
     return (
-        query.order_by(PlaceItem.id.desc())
+        query.order_by(
+            PlaceItem.title.asc(),
+            PlaceItem.id.asc(),
+        )
         .all()
     )
 
 
 @api.get(
-    "/tourism/categories",
-    summary="관광지 카테고리 목록 조회",
+    "/categories",
+    summary="장소 카테고리 목록 조회",
 )
-def tourism_categories(
+def categories(
     region: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
@@ -114,51 +129,36 @@ def tourism_categories(
 
 
 @api.get(
-    "/tourism/{place_id}",
+    "/details",
     response_model=Place,
-    summary="관광지 상세 조회",
+    summary="장소 상세 조회",
 )
-def tourism_detail(
+def place_details(
     place_id: int,
     db: Session = Depends(get_db),
 ):
-    place = (
-        db.query(PlaceItem)
-        .filter(PlaceItem.id == place_id)
-        .first()
+    return get_place_or_404(
+        db=db,
+        place_id=place_id,
     )
-
-    if not place:
-        raise HTTPException(
-            status_code=404,
-            detail="tourism place not found",
-        )
-
-    return place
 
 
 @api.get(
-    "/tourism/{place_id}/location",
-    summary="관광지 좌표 조회",
+    "/location",
+    summary="장소 좌표 조회",
 )
-def tourism_location(
+def place_location(
     place_id: int,
     db: Session = Depends(get_db),
 ):
-    place = (
-        db.query(PlaceItem)
-        .filter(PlaceItem.id == place_id)
-        .first()
+    place = get_place_or_404(
+        db=db,
+        place_id=place_id,
     )
-
-    if not place:
-        raise HTTPException(
-            status_code=404,
-            detail="tourism place not found",
-        )
 
     return {
         "id": place.id,
+        "content_id": place.content_id,
         "title": place.title,
         "mapx": place.mapx,
         "mapy": place.mapy,
@@ -166,10 +166,10 @@ def tourism_location(
 
 
 @api.get(
-    "/tourism/{place_id}/posts",
+    "/places/{place_id}/posts",
     summary="장소별 게시글 목록 조회",
 )
-def tourism_posts(
+def place_posts(
     place_id: int,
     sort: str = "latest",
     page: int = 1,
@@ -184,14 +184,19 @@ def tourism_posts(
         size=size,
     )
 
-    normalized_page = max(page, 1)
+    normalized_page = max(
+        page,
+        1,
+    )
     normalized_size = min(
         max(size, 1),
         100,
     )
 
     return {
-        "place": serialize_place_summary(place),
+        "place": serialize_place_summary(
+            place
+        ),
         "page": normalized_page,
         "size": normalized_size,
         "total": total,
@@ -225,7 +230,10 @@ def posts(
         content_type=content_type,
     )
 
-    normalized_page = max(page, 1)
+    normalized_page = max(
+        page,
+        1,
+    )
     normalized_size = min(
         max(size, 1),
         100,
@@ -321,7 +329,9 @@ def posts_create(
         ) == 0:
             continue
 
-        normalized_images.append(image)
+        normalized_images.append(
+            image
+        )
 
     if len(normalized_images) > 10:
         raise HTTPException(
@@ -354,7 +364,10 @@ def posts_create(
             if not file_bytes:
                 continue
 
-            target.write_bytes(file_bytes)
+            target.write_bytes(
+                file_bytes
+            )
+
             image_paths.append(
                 str(target)
             )
@@ -430,13 +443,15 @@ def posts_detail(
         post=post,
     )
 
+    comments = list_comments(
+        db=db,
+        post_id=post_id,
+    )
+
     return serialize_post(post) | {
         "comments": [
             comment_to_tree(comment)
-            for comment in list_comments(
-                db=db,
-                post_id=post_id,
-            )
+            for comment in comments
         ],
     }
 
@@ -486,12 +501,14 @@ def posts_delete(
         password=password,
     )
 
-    return {"ok": True}
+    return {
+        "ok": True,
+    }
 
 
 @api.post(
     "/posts/{post_id}/comments",
-    summary="댓글/답글 생성",
+    summary="댓글 및 답글 생성",
 )
 def comments_create(
     post_id: int,
@@ -560,7 +577,9 @@ def posts_like(
         client_id=client_id,
     )
 
-    return {"ok": True}
+    return {
+        "ok": True,
+    }
 
 
 @api.post(
@@ -583,7 +602,9 @@ def posts_bookmark(
         client_id=client_id,
     )
 
-    return {"ok": True}
+    return {
+        "ok": True,
+    }
 
 
 @api.post(
@@ -621,7 +642,7 @@ def chat(
         )
 
         context = {
-            "tourism": [
+            "places": [
                 {
                     "id": place.id,
                     "title": place.title,
@@ -629,15 +650,16 @@ def chat(
                     "content_type": (
                         place.content_type
                     ),
+                    "content_type_id": (
+                        place.content_type_id
+                    ),
                 }
                 for place in tourism_places
             ],
             "posts": [
                 {
                     "id": post.id,
-                    "place_id": (
-                        post.place_id
-                    ),
+                    "place_id": post.place_id,
                     "title": post.title,
                 }
                 for post in posts
@@ -697,8 +719,8 @@ app = FastAPI(
     title="Local Community Backend",
     version="1.0.0",
     description=(
-        "관광지 조회, 익명 커뮤니티, "
-        "댓글/좋아요/북마크, 챗봇을 포함한 "
+        "장소 조회, 익명 커뮤니티, "
+        "댓글, 좋아요, 북마크, 챗봇을 포함한 "
         "지역 정보 공유 백엔드"
     ),
 )
