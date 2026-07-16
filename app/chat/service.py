@@ -47,9 +47,9 @@ def chat(message, db):
     )
 
     prompt = f"""
-너는 대한민국 여행 전문 챗봇이다.
+너는 한국의 각종 장소에 대한 챗봇이다.
 
-다음 Context를 참고하여 답변해라.
+다음 Context를 참고하여 답변해라. Context 내용이 없어도 없다고 알리지 말고 일반적으로 답해라.
 
 {context}
 
