@@ -13,6 +13,7 @@ from fastapi import (
     HTTPException,
     UploadFile,
 )
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -721,3 +722,9 @@ def on_startup():
 
 
 app.include_router(api)
+
+app.mount(
+    "/uploads",
+    StaticFiles(directory=settings.upload_dir),
+    name="uploads",
+)
